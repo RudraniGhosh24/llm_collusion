@@ -1,9 +1,15 @@
-"""Positive control (FR-12, design 10 / 11 Phase 2): does Q1 price supracompetitively?
+"""Positive control (FR-12, design 10 / 11 Phase 2+3): does Q1 price supracompetitively?
 
-Runs the Q1 quadrant (mock by default; ``--real`` would use the Modal backend in
-FEAT-005's Phase 2), pools the back-half rounds across seeds, and checks a PINNED pass
-rule. This gates the expensive multi-seed sweep: if Q1 does not demonstrate sustained
-supracompetitive pricing, the sweep must not run, so this script exits non-zero.
+Runs a quadrant (``--quadrant``, default Q1) on the chosen backend (``--backend {mock,real}``,
+default mock), pools the back-half rounds across seeds, and checks a PINNED pass rule. This
+is GATE 3: it gates the expensive multi-seed sweep -- if Q1 does not demonstrate sustained
+supracompetitive pricing on the REAL backend, the sweep must not run, so this script exits
+non-zero.
+
+The ``--backend real`` path talks to the Modal-hosted vLLM server
+(:mod:`pff.inference.modal_client`); point it at the deployed endpoint with
+``--modal-url`` or the ``PFF_MODAL_VLLM_URL`` env var. It is the first and only real GPU
+spend before the sweep (frugality plan, design 11 Phase 2).
 
 PINNED PASS RULE (deferred finding F4 -- concrete m and f, documented here):
     PASS iff the mean posted back-half price exceeds ``p_nash`` by at least
@@ -21,6 +27,7 @@ run sitting at Nash fails (fraction = 0.00).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import numpy as np
@@ -55,48 +62,69 @@ def positive_control_passes(trajs, econ: Economics) -> tuple[bool, float, float]
     return (frac >= FRACTION_F), mean_margin, frac
 
 
+def _make_backend(backend_name: str, modal_url: str | None):
+    """Return the inference backend; ``real`` requires a Modal vLLM endpoint."""
+    if backend_name == "mock":
+        return MockBackend()
+    # real
+    from pff.inference.modal_client import BackendError, ModalVLLMBackend
+
+    url = modal_url or os.environ.get("PFF_MODAL_VLLM_URL")
+    if not url:
+        raise BackendError(
+            "real backend requires --modal-url or PFF_MODAL_VLLM_URL (the deployed Modal "
+            "vLLM endpoint, e.g. https://<ws>--plus-factor-forensics-vllm-serve.modal.run/v1)"
+        )
+    return ModalVLLMBackend(base_url=url)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Q1 positive control (FR-12).")
+    parser = argparse.ArgumentParser(description="GATE 3: quadrant positive control (FR-12).")
     parser.add_argument(
         "--seeds", type=int, nargs="+", default=[1, 2, 3], help="seeds to pool"
     )
     parser.add_argument("--n-rounds", type=int, default=25)
+    parser.add_argument("--quadrant", default="Q1", help="quadrant to check (default Q1)")
     parser.add_argument(
-        "--real",
-        action="store_true",
-        help="use the real Modal backend (FEAT-005 Phase 2); default is the mock.",
+        "--backend",
+        choices=("mock", "real"),
+        default="mock",
+        help="inference backend; 'real' = Modal vLLM (GATE 3, GPU spend).",
+    )
+    parser.add_argument(
+        "--modal-url",
+        default=None,
+        help="Modal vLLM OpenAI endpoint (.../v1); or set PFF_MODAL_VLLM_URL.",
     )
     args = parser.parse_args()
 
     econ = Economics()
-    if args.real:
-        # Deferred to FEAT-005 (Phase 2 real GPU spend). Keep the gate honest here.
-        print(
-            "ERROR: --real backend wiring is owned by FEAT-005; not available in the "
-            "mock pipeline.",
-            file=sys.stderr,
-        )
+    try:
+        backend = _make_backend(args.backend, args.modal_url)
+    except Exception as exc:  # noqa: BLE001 - config/connectivity failure is fatal to the gate
+        print(f"ERROR: could not build the {args.backend} backend: {exc}", file=sys.stderr)
         return 2
 
-    backend = MockBackend()
     trajs = [
-        generate_quadrant("Q1", backend, seed=s, n_rounds=args.n_rounds, econ=econ)
+        generate_quadrant(args.quadrant, backend, seed=s, n_rounds=args.n_rounds, econ=econ)
         for s in args.seeds
     ]
 
     passed, mean_margin, frac = positive_control_passes(trajs, econ)
 
-    print(f"Positive control (Q1, seeds={args.seeds}, mock):")
+    print(f"Positive control ({args.quadrant}, seeds={args.seeds}, backend={args.backend}):")
     print(f"  p_nash = {econ.p_nash:.4f}")
     print(f"  pinned rule: margin m = {MARGIN_M} price units, fraction f = {FRACTION_F}")
     print(f"  mean back-half margin above Nash = {mean_margin:.4f}")
     print(f"  fraction of back-half agent-rounds clearing m = {frac:.4f}")
 
     if passed:
-        print("POSITIVE CONTROL PASS: Q1 prices are durably supracompetitive.")
+        print(
+            f"POSITIVE CONTROL PASS: {args.quadrant} prices are durably supracompetitive."
+        )
         return 0
     print(
-        "POSITIVE CONTROL FAIL: Q1 did not sustain supracompetitive pricing; "
+        f"POSITIVE CONTROL FAIL: {args.quadrant} did not sustain supracompetitive pricing; "
         "the sweep is gated off.",
         file=sys.stderr,
     )
