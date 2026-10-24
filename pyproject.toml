@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pff"
+version = "0.1.0"
+description = "Plus-Factor Forensics: a causal collusion-detection research harness"
+requires-python = ">=3.12"
+dependencies = [
+    "modal==1.6.2",
+    "numpy==2.5.4",
+    "scipy==1.18.1",
+    "matplotlib==3.11.2",
+    "pydantic==2.14.1",
+    "openai==3.37.0",
+    "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pff = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
