@@ -124,7 +124,13 @@ class MockBackend(InferenceBackend):
 
         if policy == "q1_channel":
             idx = self._q1_channel(own_hist, rival_hist, ctrl, mono_idx, nash_idx)
-            channel = f"CHANNEL=TARGET={clip(idx)}"
+            # Announce a time-varying, strictly supracompetitive target for next round so
+            # the explicit channel carries real information the rival follows (keeps pf2's
+            # explicit MI non-trivial) without ever dropping to the competitive tier.
+            lo = min(mono_idx, nash_idx + 1)
+            span = max(1, mono_idx - lo + 1)
+            next_target = clip(lo + ((round_index + 1) % span))
+            channel = f"CHANNEL=TARGET={next_target}"
             plan = f"PLAN=aim_for_idx_{clip(idx)}"
             return f"PRICE={clip(idx)}\n{channel}\n{plan}"
 
@@ -160,13 +166,12 @@ class MockBackend(InferenceBackend):
     def _q1_channel(
         own_hist: list[int], rival_hist: list[int], ctrl: dict, mono_idx: int, nash_idx: int
     ) -> int:
-        # Read the rival's encoded TARGET message (if any) and move toward it; otherwise
-        # drift from nash toward monopoly by one step per round.
+        # Follow the rival's encoded TARGET message when present (the channel is the
+        # coordination substrate). With no message yet, open supracompetitively.
         target = ctrl.get("rival_target")
         if target is not None:
             return int(target)
-        cur = own_hist[-1] if own_hist else nash_idx
-        return min(mono_idx, cur + 1)
+        return min(mono_idx, nash_idx + 1)
 
     @staticmethod
     def _q2_order(

@@ -137,7 +137,13 @@ def run_bertrand(
         for aid in order:
             agent = agents[ids.index(aid)]
             rival_id = ids[1] if aid == ids[0] else ids[0]
-            extra: dict = {"br_table": br_table, "order_signal": decoded_signal}
+            extra: dict = {"br_table": br_table}
+            # The decoded ordering signal is injected ONLY when a Q2-style ordering
+            # schedule is in force. Leaving it out of Q1/Q3/Q4 prompts keeps the Q3
+            # negative control leak-free (no "signal" token in its control block, FR-B)
+            # and avoids handing agents a field their policy never reads.
+            if order_schedule is not None:
+                extra["order_signal"] = decoded_signal
             # Decode rival's encoded target from its previous channel message (Q1).
             rival_prev_msg = prev_msgs.get(rival_id)
             if rival_prev_msg and "TARGET=" in rival_prev_msg:
