@@ -18,8 +18,7 @@ Gemini-3.8-flash, Gemini-2.5-pro, and Claude Sonnet 4.6, a correlation-and-judge
 false-positives on innocent parallelism, and on the two most capable models (Gemini-2.5-pro,
 Claude Sonnet 4.6) it flags every condition, including fully independent agents, as
 collusion. The plus-factor auditor has a false-positive rate of **zero on all six models**.
-Its recall is specificity-first and calibration-sensitive (see the paper). Full numbers in
-`RESULTS.md` and the paper (`PAPER.pdf`).
+Its recall is specificity-first and calibration-sensitive. Full numbers are in `RESULTS.md`.
 
 ## The four labeled conditions
 
@@ -99,11 +98,8 @@ src/pff/      envs/ agents/ inference/ logging/ quadrants/ detectors/ eval/
 scripts/      run_scripted_game, run_mock_pipeline, run_eval,
               build_kaggle_job (open-weight sweep), kbench_task (frontier sweep)
 tests/        mock modules + GPU-gated modules
-paper/        build_pdf.py, make_results_figure.py
 results/      audit_table.csv, figures/
-PAPER.md / PAPER.pdf   the write-up
 RESULTS.md    headline numbers
-RESEARCH_LOG.md   full chronological record of decisions, failures, and results
 ```
 
 ## Originality and credits

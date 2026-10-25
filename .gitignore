@@ -18,3 +18,10 @@ results/trajectories_real/
 .agents/
 # OS
 .DS_Store
+
+# Paper write-up and lab notebook (kept out of the public code repo)
+PAPER.md
+PAPER.pdf
+RESEARCH_LOG.md
+fig_crossmodel_fpr.png
+paper/
