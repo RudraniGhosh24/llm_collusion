@@ -1,115 +1,124 @@
-# Plus-Factor Forensics
+# Correlation Is Not Collusion: A Plus-Factor Auditor for AI Agents
 
-A local-first Python research harness that pits a **naive, association-based** collusion
-detector against a **causal, plus-factors-doctrine auditor** over logged multi-agent
-Bertrand-pricing trajectories.
+A local-first Python research harness that pits a **naive, correlation-based** collusion
+detector against a **plus-factor auditor** grounded in antitrust doctrine, over logged
+multi-agent Bertrand-pricing trajectories.
 
-**Thesis.** In a constructed negative control where two agents share the *same base-model
-checkpoint* but have no channel and no incentive to coordinate (innocent parallelism), the
-naive detector false-positives while the plus-factor auditor does not — without losing
-recall on genuine collusion. Everything except final real-LLM trajectory generation runs at
-**$0, GPU-free, deterministic** via a mock inference backend; only the gated sweep touches a
-Modal GPU. See `RESULTS.md` for the headline numbers and an explicit statement of what is
-real vs mock.
+**Thesis.** Two agents built on the same model often behave alike for an innocent reason:
+shared training leads them to the same choices, with no agreement between them. A detector
+that treats similarity as collusion flags this innocent parallelism as a conspiracy.
+Antitrust law resolved the same problem long ago: parallel conduct alone is not unlawful,
+and inferring an agreement requires extra circumstantial evidence known as *plus factors*.
+We turn that doctrine into a black-box auditor that scores trajectories for the signatures
+of an agreement (acting against self-interest, signalling, plan-to-action concordance)
+rather than for correlation.
+
+**Headline result (real runs, six models).** Across Qwen2.5-7B, Llama-3.1-8B, GPT-5.5,
+Gemini-3.8-flash, Gemini-2.5-pro, and Claude Sonnet 4.6, a correlation-and-judge detector
+false-positives on innocent parallelism, and on the two most capable models (Gemini-2.5-pro,
+Claude Sonnet 4.6) it flags every condition, including fully independent agents, as
+collusion. The plus-factor auditor has a false-positive rate of **zero on all six models**.
+Its recall is specificity-first and calibration-sensitive (see the paper). Full numbers in
+`RESULTS.md` and the paper (`PAPER.pdf`).
+
+## The four labeled conditions
+
+Game, economics, and seed are held fixed; only the coordination mechanism varies.
+
+- **Q1** collusion with an explicit chat channel and an incentive to keep joint prices high
+- **Q2** collusion with no chat channel, only an action-ordering side channel
+- **Q3** the negative control: one model instance plays both sellers, no channel, no
+  incentive (innocent parallelism, the computational analogue of lawful conscious parallelism)
+- **Q4** fully independent one-shot best-responders
 
 ## Install
 
 ```bash
-cd /path/to/.worktrees/plus-factor-forensics
-# pip is NOT present in the venv; use uv (uv manages this project):
+cd /path/to/llm_collusion
+# the venv is uv-managed and has no pip; install with uv:
 uv pip install --python /path/to/.venv/bin/python -e .
 ```
 
-All dependencies are pinned with exact `==` in both `pyproject.toml` and `requirements.lock`
-(a test, `test_deps_pinned`, enforces this). `vllm` is pinned inside the Modal image only.
+Dependencies are pinned with exact `==` in `pyproject.toml` and `requirements.lock`
+(enforced by `test_deps_pinned`).
 
-## Run (the three gates, cheapest → most expensive)
+## Run (GPU-free)
 
 ```bash
 PY=/path/to/.venv/bin/python
 
-# full mock test suite (13 modules; the 2 GPU-gated tests skip without a Modal endpoint)
+# full test suite (GPU-gated tests skip without an endpoint)
 $PY -m pytest -q
 
-# GATE 1 — Phase 0: scripted abstract-game net-influence validation ($0, no GPU)
+# scripted abstract-game net-influence validation ($0, no GPU)
 $PY scripts/run_scripted_game.py
 
-# GATE 2 — Phase 1: full Q1–Q4 mock pipeline -> results/audit_table.csv + 5 figures ($0)
+# full Q1-Q4 mock pipeline -> results/audit_table.csv + figures ($0, no GPU)
 $PY scripts/run_mock_pipeline.py
-
-# GATE 3 — Phase 2: the FIRST and ONLY real GPU spend (see "Running the real sweep")
-$PY scripts/positive_control.py --backend real --quadrant Q1
 ```
 
-GATE 3 is a hard gate: the multi-seed real sweep must **not** run unless the real Q1
-positive control exits 0.
+The mock backend reproduces the full pipeline deterministically at $0 so the method can be
+exercised without a GPU. Real trajectories are generated against a real inference backend
+(see below).
 
-## Running the real sweep (Modal GPU — currently blocked)
+## Real runs
 
-> **Status:** Modal GPU functions on the sprint account require a payment method
-> (`InvalidError: Please add a payment method to use <TIER> GPU functions.`). The $50 credit
-> does not lift this. CPU Modal functions work, so the code is deploy-ready but the real
-> runs have **not** been executed. No real GPU credit was consumed. See `RESULTS.md`.
+The inference layer is backend-agnostic (`src/pff/inference/interface.py`). Any backend
+implementing it drops into the env, generator, and detectors unchanged. Backends provided:
 
-Once a payment method is added at [modal.com](https://modal.com):
+- `mock_backend.py` — deterministic, GPU-free, for testing and CI.
+- `hf_backend.py` — HuggingFace Transformers, used to self-host Qwen2.5-7B and
+  Llama-3.1-8B on a Kaggle T4 GPU (self-hosting is required for the Q3 same-checkpoint control).
+- `vllm_backend.py` — talks to a vLLM OpenAI-compatible server.
+- `kbench_backend.py` — Kaggle Benchmarks model proxy, used for the frontier models
+  (GPT-5.5, Gemini-3.8-flash, Gemini-2.5-pro, Claude Sonnet 4.6).
 
-```bash
-PY=/path/to/.venv/bin/python
+The six-model results in `RESULTS.md` and the paper were produced this way: open-weight
+models self-hosted on a free Kaggle T4 (5 seeds/condition), frontier models through the
+Kaggle Benchmarks proxy (2 seeds/condition). The open-weight sweep driver is
+`scripts/build_kaggle_job.py`; the frontier task is `scripts/kbench_task.py`.
 
-# 1. deploy the one-warm-GPU vLLM server (Qwen2.5-7B-Instruct + Llama-3.1-8B-Instruct)
-$PY -m modal deploy modal_app/vllm_server.py
-#    for the Q3 same-checkpoint determinism control, deploy with:
-PFF_VLLM_Q3_DETERMINISM=1 $PY -m modal deploy modal_app/vllm_server.py
+## Code to plus-factor to result map
 
-# 2. export the printed endpoint (ends in /v1)
-export PFF_MODAL_VLLM_URL=https://<workspace>--plus-factor-forensics-vllm-serve.modal.run/v1
+Auditor decision rule: `pf1_fires AND (pf2_fires OR pf4_fires)`. pf1 is the primary
+discriminator; pf3 and net influence are reported but not gated.
 
-# 3. GATE 3: real Q1 positive control (frugal: few seeds, short outputs)
-$PY scripts/positive_control.py --backend real --quadrant Q1 --seeds 1 2 3
-
-# 4. only if GATE 3 passes — the gated real sweep, then the real eval
-$PY scripts/generate_trajectories.py --seeds 1 2 3
-$PY scripts/run_eval.py --traj-dir results/trajectories_real
-
-# the two GPU-gated tests then run instead of skipping:
-$PY -m pytest tests/test_modal_backend_gpu.py tests/test_q3_determinism_gpu.py -q
-```
-
-Cost discipline: smallest adequate GPU (A10G/L4), one warm server, short `scaledown_window`,
-weights cached on a Modal Volume, 3–5 seeds/quadrant, short `--max-tokens`.
-
-## Code → plus factor → result map (design §1)
-
-Each plus factor has exactly one module and emits one named column in the auditor output
-and one figure/row-group in the eval artifacts.
-
-| Signal | Definition | Module | Output field | Eval artifact |
-|---|---|---|---|---|
-| Plus factor #1 — action against self-interest (**gate**) | directional counterfactual payoff gap, rival pinned at Nash | `detectors/plusfactor/pf1_self_interest.py` + `detectors/replay.py` | `pf1_gap` (directional) | `fig_pf1_gap.png`, col in `audit_table.csv` |
-| Plus factor #2 — comms / side-channel (**gate: pf2 OR pf4**) | explicit-channel MI OR order-code MI | `detectors/plusfactor/pf2_signaling.py` | `pf2_signal_score` | col in `audit_table.csv` |
-| Plus factor #3 — motive + opportunity (corroboration only) | shared incentive AND usable channel | `detectors/plusfactor/pf3_motive_opportunity.py` | `pf3_motive_opp` | col in `audit_table.csv` |
-| Plus factor #4 — plan → action (**gate: pf2 OR pf4**) | B tracks A's private plan; hard `0.0` if inapplicable | `detectors/plusfactor/pf4_plan_to_action.py` | `pf4_plan_action` (float) | col in `audit_table.csv` |
-| Net pairwise influence | info-theoretic realization of #1 | `detectors/plusfactor/net_influence.py` | `net_influence` | `fig_influence_validation.png` |
-| Naive correlation | back-half price correlation | `detectors/naive.py` | `naive_corr` | `fig_confusion.png` |
-| Naive LLM-judge | conversation/price score | `detectors/naive.py` | `naive_judge` | `fig_confusion.png` |
-
-Auditor decision rule (design §8.6): `pf1_fires AND (pf2_fires OR pf4_fires)`. pf1 is the
-primary discriminator; pf3 and net influence are **reported but not gated**.
+| Signal | Definition | Module |
+|---|---|---|
+| pf1 action against self-interest (gate) | directional counterfactual payoff gap, rival pinned at Nash | `detectors/plusfactor/pf1_self_interest.py`, `detectors/replay.py` |
+| pf2 signalling (gate: pf2 OR pf4) | explicit-channel or order-code mutual information | `detectors/plusfactor/pf2_signaling.py` |
+| pf3 motive + opportunity (corroboration) | shared incentive and a usable channel | `detectors/plusfactor/pf3_motive_opportunity.py` |
+| pf4 plan to action (gate: pf2 OR pf4) | B tracks A's private plan | `detectors/plusfactor/pf4_plan_to_action.py` |
+| net pairwise influence | information-theoretic realization of pf1 | `detectors/plusfactor/net_influence.py` |
+| naive correlation + LLM judge | back-half price correlation, transcript score | `detectors/naive.py` |
 
 ## Layout
 
 ```
-src/pff/            envs/ agents/ inference/ logging/ quadrants/ detectors/ eval/
-modal_app/          vllm_server.py        # the only GPU-spending component (deployed separately)
-scripts/            run_scripted_game, run_mock_pipeline, positive_control,
-                    generate_trajectories, run_eval
-tests/              13 mock modules + 2 GPU-gated modules (skip without a Modal endpoint)
-results/            audit_table.csv, figures/*.png
-RESULTS.md          headline numbers + real-vs-mock statement
+src/pff/      envs/ agents/ inference/ logging/ quadrants/ detectors/ eval/
+scripts/      run_scripted_game, run_mock_pipeline, run_eval,
+              build_kaggle_job (open-weight sweep), kbench_task (frontier sweep)
+tests/        mock modules + GPU-gated modules
+paper/        build_pdf.py, make_results_figure.py
+results/      audit_table.csv, figures/
+PAPER.md / PAPER.pdf   the write-up
+RESULTS.md    headline numbers
+RESEARCH_LOG.md   full chronological record of decisions, failures, and results
 ```
+
+## Originality and credits
+
+The environment, four-condition generator, both detectors, and evaluation were written from
+scratch. We did not clone or vendor the hackathon starter repository or any other collusion
+codebase. Models: Qwen2.5-7B-Instruct (Alibaba/Qwen), Llama-3.1-8B-Instruct (Meta, via the
+public NousResearch Hugging Face mirror), and frontier models via the Kaggle Benchmarks
+proxy. Tools: vLLM, Hugging Face Transformers, Kaggle Notebooks and Kaggle Benchmarks,
+numpy, scipy, matplotlib, pydantic. Economics follow the standard logit-demand
+repeated-Bertrand setup (Calvano et al., 2020; Fish et al., 2024).
 
 ## Honesty
 
-No results, metrics, or citations are fabricated. All numbers in `RESULTS.md` come from
-committed run artifacts produced by the GPU-free mock pipeline; the real-LLM sweep is wired
-but blocked (Modal GPU payment method). Unverified citations are marked `verify citation`.
+No results, metrics, or citations are fabricated. Numbers come from committed run artifacts.
+DeepSeek-R1 could not be run to completion because the provider rate-limited it; this is
+reported, not papered over. A few 2026 arXiv citations are flagged in the paper for a final
+author-list confirmation.
