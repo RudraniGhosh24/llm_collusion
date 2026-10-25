@@ -10,3 +10,11 @@ artifacts/
 # scripts/generate_trajectories.py).
 results/trajectories/
 results/trajectories_real/
+# Secrets (Kaggle Benchmarks model-proxy token) — never commit
+.env
+.env.*
+*.access_token
+# Internal workflow task artifacts
+.agents/
+# OS
+.DS_Store

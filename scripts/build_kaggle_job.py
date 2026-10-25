@@ -43,7 +43,7 @@ def build_blob(package_dir: Path = PACKAGE_DIR) -> bytes:
 
 
 PROLOGUE = '''# AUTO-GENERATED Kaggle job: Plus-Factor Forensics real LLM sweep. Do not edit by hand.
-import base64, io, os, subprocess, sys, time, zipfile, json, itertools
+import base64, io, os, subprocess, sys, time, zipfile, json, itertools, traceback
 from pathlib import Path
 
 # 1) unpack embedded pff package to /tmp and put it on sys.path
@@ -53,28 +53,24 @@ with zipfile.ZipFile(io.BytesIO(base64.b64decode(_PFF_BLOB))) as zf:
     zf.extractall(_BUNDLE)
 sys.path.insert(0, str(_BUNDLE))
 
-# 2) install runtime deps. Kaggle's image is Python 3.13 with a recent torch, so we do
-# NOT pin vllm (old pins drag in torchvision builds that don't exist for 3.13). Let pip
-# pick a vllm compatible with the preinstalled torch; print the resolved version.
+# 2) deps. We deliberately do NOT use vLLM: on Kaggle its CUDA-kernel build fights the
+# preinstalled torch/CUDA stack (observed: server never starts). Instead we use the
+# transformers + torch that Kaggle already ships (works on T4 out of the box) and
+# compile nothing. Only tiny pure-python deps may need installing; everything heavy is
+# preinstalled.
 subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-                "openai>=1.40", "pydantic>=2", "scipy>=1.11", "matplotlib>=3.7"],
-               check=True)
-_vllm_ok = False
-for _spec in ["vllm", "vllm<0.7", "vllm==0.6.3.post1"]:
-    r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", _spec])
-    if r.returncode == 0:
-        _vllm_ok = True
-        print("installed vllm via spec:", _spec, flush=True)
-        break
-if not _vllm_ok:
-    raise SystemExit("could not install a Python-3.13-compatible vllm on Kaggle")
-import vllm as _v
-print("resolved vllm", getattr(_v, "__version__", "?"), flush=True)
+                "pydantic>=2", "scipy>=1.11", "matplotlib>=3.7",
+                "accelerate>=0.26"], check=True)
 
-import requests  # Kaggle preinstalls
+import torch, transformers
+print("torch", torch.__version__, "cuda?", torch.cuda.is_available(),
+      "transformers", transformers.__version__, flush=True)
+assert torch.cuda.is_available(), "no CUDA — enable GPU accelerator on the kernel"
+print("gpu:", torch.cuda.get_device_name(0), flush=True)
 
-MODELS = {"qwen": "Qwen/Qwen2.5-7B-Instruct", "llama": "meta-llama/Llama-3.1-8B-Instruct"}
-PORT = 8000
+# Qwen already ran; this pass adds the second family via a NON-GATED Llama-3.1-8B
+# mirror (no HF token needed). NousResearch mirror is the standard open redistribution.
+MODELS = {"llama": "NousResearch/Meta-Llama-3.1-8B-Instruct"}
 SEEDS = [1, 2, 3, 4, 5]
 N_ROUNDS = 25
 TEMPERATURE = 0.7
@@ -82,29 +78,7 @@ TEMPERATURE = 0.7
 RESULTS = Path("/kaggle/working/results"); TRAJ = RESULTS / "trajectories"
 TRAJ.mkdir(parents=True, exist_ok=True)
 
-def start_server(hf_model):
-    p = subprocess.Popen(
-        [sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-         "--model", hf_model, "--port", str(PORT),
-         "--max-model-len", "4096", "--gpu-memory-utilization", "0.90",
-         "--disable-log-requests"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-    for _ in range(180):
-        try:
-            if requests.get(f"http://localhost:{PORT}/v1/models", timeout=5).status_code == 200:
-                print("server up:", hf_model, flush=True); return p
-        except Exception:
-            pass
-        time.sleep(10)
-    raise RuntimeError("vLLM did not start for " + hf_model)
-
-def stop_server(p):
-    p.terminate()
-    try: p.wait(timeout=60)
-    except Exception: p.kill()
-    time.sleep(5)
-
-from pff.inference.vllm_backend import VLLMBackend
+from pff.inference.hf_backend import HFBackend
 from pff.quadrants.generator import generate_all_quadrants
 from pff.logging.logger import write_trajectories, read_trajectories
 from pff.eval.metrics import evaluate
@@ -121,21 +95,34 @@ def alias(served):
 generated = []
 for key, hf in MODELS.items():
     try:
-        proc = start_server(hf)
+        print(f"=== loading {hf} via transformers ===", flush=True)
+        t0 = time.time()
+        backend = HFBackend(hf, model_aliases=alias(hf))
+        print(f"loaded {hf} in {time.time()-t0:.0f}s", flush=True)
+        # fail-fast smoke: one real generation, surface any error immediately
+        sm = backend.chat(hf, [{"role": "user", "content": "Reply with exactly PRICE=7"}],
+                          temperature=0.0, seed=0, max_tokens=16)
+        print(f"smoke completion for {key}: {sm.text!r}", flush=True)
     except Exception as e:
-        print("SKIP model", key, "->", e, flush=True)
+        print(f"SKIP model {key} -> {type(e).__name__}: {e}", flush=True)
+        traceback.print_exc()
         continue
-    try:
-        backend = VLLMBackend(base_url=f"http://localhost:{PORT}/v1", model_aliases=alias(hf))
-        print("served:", backend.available_models(), flush=True)
-        for seed in SEEDS:
+    for seed in SEEDS:
+        try:
             trajs = generate_all_quadrants(backend, seed=seed, n_rounds=N_ROUNDS, temperature=TEMPERATURE)
             out = TRAJ / f"{key}_seed{seed}.trajectories.jsonl"
             write_trajectories(out, list(trajs.values()))
             generated.append(out.name)
-            print("  wrote", out.name, flush=True)
-    finally:
-        stop_server(proc)
+            print(f"  wrote {out.name}", flush=True)
+        except Exception as e:
+            print(f"  seed {seed} failed: {type(e).__name__}: {e}", flush=True)
+            traceback.print_exc()
+    # free GPU memory before loading the next model
+    del backend
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 print("generated files:", generated, flush=True)
 
