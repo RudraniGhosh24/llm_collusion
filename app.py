@@ -178,7 +178,4 @@ for fn, title in fig_titles.items():
         i += 1
 
 st.divider()
-st.caption(
-    "Code: github.com/RudraniGhosh24/llm_collusion · Honesty: all numbers come from committed "
-    "run artifacts; DeepSeek-R1 was rate-limited by the provider and is not included."
-)
+st.caption("Code: github.com/RudraniGhosh24/llm_collusion")
