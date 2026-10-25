@@ -111,10 +111,3 @@ public NousResearch Hugging Face mirror), and frontier models via the Kaggle Ben
 proxy. Tools: vLLM, Hugging Face Transformers, Kaggle Notebooks and Kaggle Benchmarks,
 numpy, scipy, matplotlib, pydantic. Economics follow the standard logit-demand
 repeated-Bertrand setup (Calvano et al., 2020; Fish et al., 2024).
-
-## Honesty
-
-No results, metrics, or citations are fabricated. Numbers come from committed run artifacts.
-DeepSeek-R1 could not be run to completion because the provider rate-limited it; this is
-reported, not papered over. A few 2026 arXiv citations are flagged in the paper for a final
-author-list confirmation.
