@@ -1,7 +1,0 @@
-{
-  "task_id": "task-plus-factor-forensics",
-  "task_description": "Build the Plus-Factor Forensics research harness: a Bertrand pricing env + abstract discrete game, a counterfactual-replay-ready trajectory logger, a Modal vLLM inference layer with a GPU-free mock backend, a four-quadrant labeled generator, a naive association detector and a causal plus-factor auditor (4 counterfactual plus factors + net pairwise influence), and an eval producing precision/recall/FPR + the headline confusion comparison + figures + RESULTS.md. Build cheap-first through three gates: scripted abstract-game $0 run (net influence ranks seeded pair above others), full mock-backend pipeline run ($0), then a single frugal real Modal Q1 positive-control run before the full real Q1-Q4 x both-model-families sweep.",
-  "status": "completed",
-  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
-  "blocked_reason": null
-}
